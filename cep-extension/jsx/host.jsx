@@ -9,6 +9,7 @@
 var AEMCP = {
   commandsFolder: null,
   processedCommands: {},
+  processedCount: 0,
   pollInterval: 100, // ms
   isRunning: false,
   clientPrefixes: {},
@@ -27,31 +28,63 @@ function initMCP() {
     AEMCP.commandsFolder.create();
   }
 
+  // Self-heal off-screen floating panel coordinates if dragged past display bounds
+  if (typeof app !== "undefined" && app && app.preferences && typeof PREFType !== "undefined") {
+    try {
+      var prefSec = "CEP_com.aemcp.panel";
+      var prefType = PREFType.PREF_Type_MACHINE_SPECIFIC;
+      if (app.preferences.havePref(prefSec, "PlugPlugWindowGeometry.x", prefType)) {
+        var gx = parseFloat(app.preferences.getPrefAsString(prefSec, "PlugPlugWindowGeometry.x", prefType));
+        var gy = parseFloat(app.preferences.getPrefAsString(prefSec, "PlugPlugWindowGeometry.y", prefType));
+        if (isNaN(gx) || isNaN(gy) || gx < 0 || gy < 0 || gx > 1600 || gy > 900) {
+          app.preferences.savePrefAsString(prefSec, "PlugPlugWindowGeometry.x", "300.000000", prefType);
+          app.preferences.savePrefAsString(prefSec, "PlugPlugWindowGeometry.y", "200.000000", prefType);
+          app.preferences.saveToDisk();
+        }
+      }
+    } catch (ePref) {}
+  }
+
   AEMCP.isRunning = true;
   return JSON.stringify({ success: true, folder: AEMCP.commandsFolder.fsName });
 }
 
 /**
- * Process pending commands
- * Called periodically by the CEP panel
+ * Return true only for pending .json command files (excluding .response/.processed/.tmp).
+ */
+function isCommandJsonFile(file) {
+  if (!file || typeof file.open !== "function") return false;
+  var name = file.name;
+  if (!name || name.length <= 5) return false;
+  var lower = name.toLowerCase();
+  return lower.substring(lower.length - 5) === ".json";
+}
+
+/**
+ * Process at most one pending command per call so After Effects' Win32 message loop
+ * can handle user mouse and keyboard input between commands.
  */
 function processCommands() {
   if (!AEMCP.commandsFolder || !AEMCP.commandsFolder.exists) {
-    return JSON.stringify({ processed: 0 });
+    return JSON.stringify({ processed: 0, hasMore: false });
   }
 
-  var files = AEMCP.commandsFolder.getFiles("*.json");
+  var files = AEMCP.commandsFolder.getFiles();
   var processed = 0;
+  var hasMore = false;
 
   for (var i = 0; i < files.length; i++) {
     var file = files[i];
 
-    // Skip response files and processed files
-    if (file.name.indexOf(".response") !== -1) continue;
-    if (file.name.indexOf(".processed") !== -1) continue;
+    if (!isCommandJsonFile(file)) continue;
 
     // Skip already processed commands
     if (AEMCP.processedCommands[file.name]) continue;
+
+    if (processed >= 1) {
+      hasMore = true;
+      break;
+    }
 
     try {
       processed += processCommandFile(file);
@@ -61,7 +94,7 @@ function processCommands() {
     }
   }
 
-  return JSON.stringify({ processed: processed });
+  return JSON.stringify({ processed: processed, hasMore: hasMore });
 }
 
 /**
@@ -155,63 +188,79 @@ function runCommandScript(script, undoName) {
 }
 
 /**
+ * Write a response payload atomically via temp file + rename without blocking the AE UI thread.
+ */
+function writeResponsePayload(commandFile, response) {
+  var payload = JSON.stringify(response);
+  var responsePath = commandFile.fsName + ".response";
+  var responseFile = new File(responsePath);
+  var tmpFile = new File(responsePath + ".tmp");
+
+  tmpFile.encoding = "UTF-8";
+  if (tmpFile.open("w")) {
+    tmpFile.write(payload);
+    tmpFile.close();
+    if (responseFile.exists) {
+      responseFile.remove();
+    }
+    if (tmpFile.rename(commandFile.name + ".response")) {
+      return;
+    }
+    tmpFile.remove();
+  }
+
+  // Fallback if atomic rename fails
+  responseFile.encoding = "UTF-8";
+  responseFile.open("w");
+  responseFile.write(payload);
+  responseFile.close();
+}
+
+/**
  * Write a success response file
  */
 function writeSuccessResponse(commandFile, data) {
-  var responsePath = commandFile.fsName + ".response";
-  var responseFile = new File(responsePath);
-
-  var response = {
+  writeResponsePayload(commandFile, {
     success: true,
     data: data,
     commandId: extractCommandId(commandFile.name),
     timestamp: new Date().getTime()
-  };
-
-  responseFile.open("w");
-  responseFile.write(JSON.stringify(response));
-  responseFile.close();
-
-  // Small delay to ensure file system catches up
-  $.sleep(50);
+  });
 }
 
 /**
  * Write an error response file
  */
 function writeErrorResponse(commandFile, error) {
-  var responsePath = commandFile.fsName + ".response";
-  var responseFile = new File(responsePath);
-
-  var response = {
+  writeResponsePayload(commandFile, {
     success: false,
     error: error,
     commandId: extractCommandId(commandFile.name),
     timestamp: new Date().getTime()
-  };
-
-  responseFile.open("w");
-  responseFile.write(JSON.stringify(response));
-  responseFile.close();
-
-  $.sleep(50);
+  });
 }
 
 /**
- * Mark a command file as processed
+ * Mark a command file as processed and delete it to keep the IPC directory clean.
  */
 function markAsProcessed(file) {
+  AEMCP.processedCount = (AEMCP.processedCount || 0) + 1;
+
+  if (Object.keys(AEMCP.processedCommands).length > 500) {
+    AEMCP.processedCommands = {};
+  }
   AEMCP.processedCommands[file.name] = true;
 
-  // Rename to .processed to archive
+  if (file.remove()) {
+    return;
+  }
+
+  // Fallback: archive as .processed if immediate deletion fails
   var processedPath = file.fsName + ".processed";
   var processedFile = new File(processedPath);
-
-  // Remove old processed file if exists
   if (processedFile.exists) {
     processedFile.remove();
   }
-
   file.rename(file.name + ".processed");
 }
 
@@ -275,7 +324,7 @@ function getMCPStatus() {
   return JSON.stringify({
     isRunning: AEMCP.isRunning,
     folder: AEMCP.commandsFolder ? AEMCP.commandsFolder.fsName : null,
-    processedCount: Object.keys(AEMCP.processedCommands).length,
+    processedCount: AEMCP.processedCount || Object.keys(AEMCP.processedCommands).length,
     aeVersion: app.version,
     project: app.project.file ? app.project.file.name : "Untitled"
   });

@@ -152,4 +152,65 @@ describe('CEP host command cleanup', () => {
     assert.deepEqual(host.calls, balancedCalls);
     assert.equal(host.responses[0].data, 42);
   });
+
+  it('processes at most one .json command per processCommands() call and ignores sidecar files', () => {
+    const responses: Array<{ success: boolean; data?: unknown }> = [];
+    const context = vm.createContext({
+      JSON,
+      app: Object.fromEntries(
+        ['beginSuppressDialogs', 'beginUndoGroup', 'endUndoGroup', 'endSuppressDialogs']
+          .map(name => [name, () => {}])
+      )
+    });
+    vm.runInContext(hostSource, context);
+    context.writeSuccessResponse = (_file: unknown, data: unknown) => {
+      responses.push({ success: true, data });
+    };
+
+    const removed: string[] = [];
+    const makeFile = (name: string, script: string) => ({
+      name,
+      fsName: `/tmp/${name}`,
+      open() {},
+      read: () => JSON.stringify({ id: name, script }),
+      close() {},
+      remove() {
+        removed.push(name);
+        return true;
+      }
+    });
+
+    const files = [
+      makeFile('cmd0.json.response', '1;'),
+      makeFile('cmd0.json.processed', '2;'),
+      makeFile('cmd0.json.tmp', '3;'),
+      { name: 'subdir' }, // Folder entry without open()
+      makeFile('cmd1.json', '({ seq: 1 });'),
+      makeFile('cmd2.json', '({ seq: 2 });')
+    ];
+
+    context.AEMCP.commandsFolder = {
+      exists: true,
+      getFiles: () => files
+    };
+
+    const first = JSON.parse(context.processCommands());
+    assert.equal(first.processed, 1);
+    assert.equal(first.hasMore, true);
+    assert.deepEqual(removed, ['cmd1.json']);
+    assert.equal(responses.length, 1);
+    assert.equal((responses[0].data as { seq: number }).seq, 1);
+
+    const second = JSON.parse(context.processCommands());
+    assert.equal(second.processed, 1);
+    assert.equal(second.hasMore, false);
+    assert.deepEqual(removed, ['cmd1.json', 'cmd2.json']);
+    assert.equal(responses.length, 2);
+    assert.equal((responses[1].data as { seq: number }).seq, 2);
+    assert.equal(context.AEMCP.processedCount, 2);
+  });
+
+  it('never blocks the After Effects UI thread with $.sleep()', () => {
+    assert.equal(hostSource.includes('$.sleep('), false);
+  });
 });

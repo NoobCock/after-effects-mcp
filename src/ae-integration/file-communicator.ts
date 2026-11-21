@@ -26,6 +26,8 @@ export class FileCommunicator {
   private logger: Logger;
   private commandTimeout: number;
   private pollRate: number;
+  private interCommandDelayMs: number = 60;
+  private executionQueue: Promise<void> = Promise.resolve();
   private isConnected: boolean = false;
 
   constructor(options: {
@@ -98,13 +100,27 @@ export class FileCommunicator {
   }
 
   /**
-   * Execute a script in After Effects and return the result
+   * Execute a script in After Effects and return the result.
+   * Serializes concurrent tool calls with a short breathing delay so After Effects'
+   * Win32 message loop can process user input between consecutive commands.
    */
   async executeScript(script: string): Promise<MCPResponse> {
     if (!this.isConnected) {
       await this.connect();
     }
 
+    const run = this.executionQueue.then(() => this.executeSingleScript(script));
+    this.executionQueue = run.then(
+      () => new Promise(resolve => setTimeout(resolve, this.interCommandDelayMs)),
+      () => new Promise(resolve => setTimeout(resolve, this.interCommandDelayMs))
+    );
+    return run;
+  }
+
+  /**
+   * Write a single command file atomically and wait for its response.
+   */
+  private executeSingleScript(script: string): Promise<MCPResponse> {
     const commandId = this.generateCommandId();
     const commandFile: CommandFile = {
       id: commandId,
@@ -116,6 +132,7 @@ export class FileCommunicator {
       this.commandsFolder,
       `${this.clientPrefix}_${commandId}.json`
     );
+    const tmpPath = `${commandPath}.tmp`;
 
     return new Promise<MCPResponse>((resolve, reject) => {
       // Set up timeout
@@ -139,11 +156,13 @@ export class FileCommunicator {
         createdAt: Date.now()
       });
 
-      // Write command file
+      // Write command file atomically so CEP's watcher never reads a partial file
       try {
-        fs.writeFileSync(commandPath, JSON.stringify(commandFile, null, 2), 'utf8');
+        fs.writeFileSync(tmpPath, JSON.stringify(commandFile, null, 2), 'utf8');
+        fs.renameSync(tmpPath, commandPath);
         this.logger.debug('Command written', { commandId, path: commandPath });
       } catch (error) {
+        this.cleanupCommandFile(commandPath);
         this.pendingCommands.delete(commandId);
         clearTimeout(timeout);
         this.logger.error('Failed to write command', { commandId, error });
@@ -289,16 +308,18 @@ export class FileCommunicator {
   }
 
   /**
-   * Clean up a command file
+   * Clean up a command file and any lingering atomic write temp file
    */
   private cleanupCommandFile(filePath: string): void {
-    try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        this.logger.debug('Cleaned up command file', { path: filePath });
+    for (const candidate of [filePath, `${filePath}.tmp`]) {
+      try {
+        if (fs.existsSync(candidate)) {
+          fs.unlinkSync(candidate);
+          this.logger.debug('Cleaned up command file', { path: candidate });
+        }
+      } catch (error) {
+        this.logger.warn('Failed to cleanup command file', { path: candidate, error });
       }
-    } catch (error) {
-      this.logger.warn('Failed to cleanup command file', { path: filePath, error });
     }
   }
 
