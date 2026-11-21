@@ -7,8 +7,6 @@ description: Drive Adobe After Effects through the ae-mcp tools. Use when the us
 
 These tools send ExtendScript to After Effects through a CEP panel. **The AE-MCP panel must be open** (Window > Extensions > AE-MCP). If every call times out, ask the user to open it.
 
-For worked recipes, read `examples.md` in this skill.
-
 ## Before you act
 
 - **Ask before calling tools that change the open project as a whole**: `save_project`, `close_project`, `open_project`, `create_project`, `reduce_project`, `collect_files`, `organize_project_items`, `import_footage`, `import_folder`, `replace_footage`. The user usually has real work open.
@@ -96,7 +94,7 @@ If one of these refuses with "Nothing was changed", the keyframes are untouched 
 ## Shape layers and paths
 
 - `add_shape_layer` - `shape`: `rectangle` (supports `roundness`), `ellipse`, `polygon`, `star` (`points`, `outerRadius`, `innerRadius`).
-- `create_path` - a real editable bezier path. `vertices` are `[x, y]` points relative to the layer, which the tool places at the comp centre. **`inTangents` / `outTangents` are relative to their own vertex**, not absolute. Omit them for corner points. `closed: false` for an open line.
+- `create_path` - a real editable bezier path. `vertices` are `[x, y]` points relative to the layer, which the tool places at the comp centre. **`inTangents` / `outTangents` are relative to their own vertex**, not absolute. Omit them for corner points. `closed: false` for an open line. For a circular arc, tangent handle length is ~0.552 × radius (e.g. 55 for radius 100).
 - `set_path_keyframes` - each keyframe carries its own full vertex list. Keep the vertex count the same between keys for clean morphing.
 - `add_shape_operator` - `operator` is one of `trimPaths`, `repeater`, `roundCorners`, `zigZag`, `twist`, `puckerBloat`, `offsetPaths`, `wigglePaths`, `wiggleTransform`, `mergePaths`, `gradientFill`, `gradientStroke`. Set values with friendly keys, for example `{"start": 0, "end": 50}` for trim paths or `{"copies": 6}` for a repeater. To animate an operator, keyframe it through its path (see Property paths).
 - **Gradient colour stops cannot be set by script.** After Effects exposes them as read-only, so gradients render with default colours. Tell the user to set the colours by hand.
@@ -149,7 +147,7 @@ If one of these refuses with "Nothing was changed", the keyframes are untouched 
     - All five take their size from how fast the property arrives at the key, so a key with no incoming motion gets no effect - including a key with easy ease on its incoming side.
   - `speedControl` accumulates a keyframed speed slider (units per second) from the layer's `inPoint`. Add the slider first with `add_expression_control(controlType="slider", controlName="Speed")`; `params`: `controlName`, `multiplier`. Exact for linear and HOLD keys, including intervals clipped by trimming. Eased keys use a midpoint approximation; use linear/HOLD keys when accurate integration matters. On array properties such as Scale it adds to every dimension.
 - **Effect parameter lists are flat and reuse names.** Particle Playground has a dozen `Position`, `Affects`, `Min` and `Max` entries; CC Particle World has two `Distance`s. A display-name path such as `Effects/Particle Playground/Position` silently hits the first one. Use the parameter's match name as the last path segment instead: `Effects/CC Particle Systems II/CC Particle Systems II-0001`.
-- `link_properties` - `offset` is **added** to the linked value. It shifts a layer; it cannot scale motion. For parallax or other multipliers, write the expression with `set_expression`.
+- `link_properties` - `offset` is **added** to the linked value. It shifts a layer; it cannot scale motion. For parallax or other multipliers, write the expression with `set_expression` (e.g. `var c = thisComp.layer("Ctrl").transform.position; value + (c - c.valueAtTime(0)) * 0.5`).
 - In your own expressions, use `value` for the pre-expression value and `thisComp.layer("Name")` to reference other layers.
 
 ## Particles
@@ -193,9 +191,3 @@ Check a particle setup with `render_frame` before calling it done - these parame
 | "Nothing was changed" | A keyframe tool refused input that would have lost keys; nothing was modified |
 | "Composition not found" / "Layer not found" | Check exact names with `list_compositions` / `list_layers` |
 | File couldn't be saved | Use a full absolute path with forward slashes, such as `C:/Projects/job.aep` |
-
-## Timing guidelines
-
-- UI elements: 0.3-0.5 s. Text reveals: 0.5-1.5 s. Logo animations: 1-3 s. Title cards: 3-5 s. Transitions: 0.5-1.5 s.
-- Natural motion: easy ease both ways. Entrances: ease out. Exits: ease in. Loops: linear.
-- Common comp sizes: 1920x1080 landscape, 1080x1920 vertical, at 24, 30 or 60 fps.
