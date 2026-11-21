@@ -7,30 +7,32 @@
 
 <h1 align="center">AE-MCP</h1>
 <p align="center"><strong>After Effects Model Context Protocol Server</strong></p>
-<p align="center">Automate Adobe After Effects with AI through 70+ MCP tools</p>
+<p align="center">Automate Adobe After Effects with AI through 102 MCP tools, resources, and prompts</p>
 
 ---
 
 ## Overview
 
-AE-MCP is a comprehensive MCP server that enables AI assistants like Claude to directly control Adobe After Effects. It provides **70+ tools** covering the full motion graphics workflow — from creating compositions to applying professional effects and expressions.
+AE-MCP is a Model Context Protocol (MCP) server that connects AI assistants (Antigravity, Claude Desktop, Claude Code, etc.) directly to **Adobe After Effects 2024+**. It exposes **102 tools**, **2 MCP resources**, and **2 prompts** spanning project management, layer/path/mask authoring, 3D rendering, keyframe & expression scripting, frame inspection, and render queue / Adobe Media Encoder delivery.
+
+> Forked from [`ishu86/after-effects-mcp`](https://github.com/ishu86/after-effects-mcp) with a hardened zero-idle-IPC CEP bridge (preventing Win32 UI thread stalls and mouse/keyboard input lockups on Windows), serialized atomic command queuing, off-screen panel geometry self-healing, and an unopinionated technical [`SKILL/SKILL.md`](SKILL/SKILL.md).
 
 ### Key Features
 
 | Feature | Description |
 |---------|-------------|
-| **70+ Tools** | Complete After Effects automation |
-| **Animation Presets** | Spring physics, bounce, elastic, slide, fade |
-| **Expression Library** | 20+ pre-built expressions (wiggle, loop, physics) |
-| **Effect Templates** | One-click professional looks (cinematic, VHS, neon) |
-| **Motion Graphics** | Lower thirds, title cards, transitions, logo reveals |
-| **Reliable Architecture** | File-based communication for stability |
+| **102 MCP Tools** | Full control of projects, comps, layers, bezier paths, masks, 3D, keyframes, expressions, effects, and rendering |
+| **Visual & State Inspection** | `render_frame` (PNG preview) and `get_comp_report` (geometry, text, expressions, keyframe & value samples) |
+| **Physics & Expression Templates** | 23 pre-built templates (`overshoot`, `bounce`, `inertia`, `springy`, `speedControl`, `loopingWiggle`, etc.) |
+| **3D, Paths & Masks** | Comp renderer switching (`classic` / `advanced` / `cinema4d`), extrusion/bevels, bezier shape paths & operators, and animated masks |
+| **Zero-Idle-IPC CEP Bridge** | Node `fs` watching inside `CEPHtmlEngine` avoids polling AE's main UI thread when idle and prevents Win32 input freezes |
+| **Render Queue & AME** | Native render queue control plus non-blocking Adobe Media Encoder (`queue_in_ame`) handoff |
 
 ---
 
 ## Requirements
 
-- **Adobe After Effects 2024** or later
+- **Adobe After Effects 2024** (`24.0`) or later (tested through After Effects 2026)
 - **Node.js 18+**
 - **macOS** or **Windows**
 
@@ -38,28 +40,53 @@ AE-MCP is a comprehensive MCP server that enables AI assistants like Claude to d
 
 ## Installation
 
-### Step 1: Install the MCP Server
+### Step 1: Clone and Build the MCP Server
 
 ```bash
-git clone https://github.com/ishu86/after-effects-mcp.git
+git clone https://github.com/NoobCock/after-effects-mcp.git
 cd after-effects-mcp
 npm install
 npm run build
 ```
 
-### Step 2: Install the CEP Extension
+*(Optionally run `npm test` to verify all 119 unit and regression tests pass.)*
+
+### Step 2: Install the CEP Extension (`com.aemcp.panel`)
 
 **macOS:**
 ```bash
 ./scripts/install-cep.sh
 ```
 
-**Windows:**
+**Windows (Command Prompt / PowerShell):**
 ```batch
 scripts\install-cep.bat
 ```
+> On Windows, `install-cep.bat` enables `PlayerDebugMode` in `HKCU\SOFTWARE\Adobe\CSXS.10`–`12`, installs `cep-extension/` to `%APPDATA%\Adobe\CEP\extensions\com.aemcp.panel` (symlink with copy fallback), and ends with `pause`. For non-interactive automation on Windows, enable `PlayerDebugMode = 1` (`REG_SZ`) and copy `cep-extension\*` directly into `%APPDATA%\Adobe\CEP\extensions\com.aemcp.panel`.
 
 ### Step 3: Configure Your AI Assistant
+
+<details>
+<summary><strong>Antigravity</strong></summary>
+
+Add `ae-mcp` to `~/.gemini/config/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ae-mcp": {
+      "command": "node",
+      "args": ["/path/to/after-effects-mcp/dist/index.js"]
+    }
+  }
+}
+```
+
+*(On Windows, use an absolute path such as `"D:\\AAProjectz\\after-effects-mcp\\dist\\index.js"`.)*
+
+To install the companion skill globally, copy [`SKILL/SKILL.md`](SKILL/SKILL.md) to `~/.gemini/config/skills/ae-mcp/SKILL.md`.
+
+</details>
 
 <details>
 <summary><strong>Claude Desktop</strong></summary>
@@ -96,126 +123,88 @@ Add to your MCP settings (`~/.claude/settings.json`):
 }
 ```
 
-**Bonus:** This repo includes a **Claude Code Skill** for enhanced After Effects automation. Copy the skill files to your Claude Code skills directory:
+To install the companion skill for Claude Code, copy [`SKILL/SKILL.md`](SKILL/SKILL.md) into your skills directory (e.g. `~/.claude/skills/ae-mcp/SKILL.md`):
 
 ```bash
-cp -r SKILL/* ~/.claude/skills/
+mkdir -p ~/.claude/skills/ae-mcp
+cp SKILL/SKILL.md ~/.claude/skills/ae-mcp/SKILL.md
 ```
-
-The Claude Code skill provides specialized knowledge about After Effects workflows, property formats, and best practices. See [`SKILL/SKILL.md`](SKILL/SKILL.md) for details.
 </details>
+
+[`SKILL/SKILL.md`](SKILL/SKILL.md) acts purely as a technical API reference and ExtendScript gotcha guide (property paths, value formats, 3D renderer matrices, particle bounds, and rendering caveats) without prescribing visual styles or timing constraints.
 
 ### Step 4: Launch After Effects
 
-1. Start **After Effects 2024+**
+1. Start (or restart) **After Effects 2024+**
 2. Open **Window > Extensions > AE-MCP**
-3. The panel will auto-start and begin listening for commands
+3. Keep the panel open (docking it into a side panel is recommended). It watches `~/Documents/ae-mcp-commands/` with zero idle `evalScript` overhead.
 
 ---
 
-## Tool Categories
+## Capabilities (102 Tools · 2 Resources · 2 Prompts)
 
-### Project & Composition
-`create_project` · `open_project` · `save_project` · `close_project` · `get_project_info` · `import_footage` · `create_composition` · `modify_composition` · `duplicate_composition` · `delete_composition` · `list_compositions` · `get_composition_info`
+### Project & Assets (15)
+`create_project` · `open_project` · `save_project` · `close_project` · `get_project_info` · `list_project_items` · `import_footage` · `import_folder` · `replace_footage` · `organize_project_items` · `find_missing_footage` · `collect_files` · `reduce_project` · `set_proxy` · `remove_proxy`
 
-### Layer Creation
-`add_solid_layer` · `add_text_layer` · `add_text_layer_advanced` · `add_shape_layer` · `add_null_layer` · `add_adjustment_layer` · `add_camera_layer` · `add_light_layer` · `add_av_layer` · `precompose_layers` · `modify_layer` · `delete_layer`
+### Compositions & Inspection (9)
+`create_composition` · `modify_composition` · `duplicate_composition` · `delete_composition` · `list_compositions` · `get_composition_info` · `set_active_composition` · `render_frame` · `get_comp_report`
 
-### Animation & Keyframing
+### Layers (14)
+`add_solid_layer` · `add_text_layer` · `add_text_layer_advanced` · `add_shape_layer` · `add_null_layer` · `add_adjustment_layer` · `add_camera_layer` · `add_light_layer` · `add_av_layer` · `precompose_layers` · `modify_layer` · `delete_layer` · `list_layers` · `get_layer_info`
+
+### Shape Paths & Operators (4)
+`create_path` · `get_path` · `set_path_keyframes` · `add_shape_operator`
+
+### Masks (7)
+`add_mask` · `list_masks` · `get_mask_path` · `set_mask_path` · `set_mask_keyframes` · `set_mask_properties` · `delete_mask`
+
+### 3D, Cameras & Lights (7)
+`set_comp_renderer` · `get_3d_info` · `set_3d_layer` · `set_material_options` · `set_geometry_options` · `set_camera_options` · `set_light_options`
+
+### Keyframes & Timing (9)
 `set_keyframe` · `set_keyframe_advanced` · `apply_easy_ease` · `set_temporal_ease` · `offset_keyframes` · `scale_keyframe_timing` · `reverse_keyframes` · `copy_keyframes` · `get_keyframes`
 
-### Expressions
-`set_expression` · `get_expression` · `remove_expression` · `enable_expression` · `add_expression_control` · `apply_expression_template` · `link_properties`
+### Expressions (8)
+`set_expression` · `get_expression` · `remove_expression` · `enable_expression` · `add_expression_control` · `apply_expression_template` · `link_properties` · `batch_set_expressions`
 
-### Effects
+### Effects (7)
 `apply_effect` · `apply_effect_template` · `modify_effect_properties` · `remove_effect` · `reorder_effects` · `copy_effects` · `list_effects`
 
-### Motion Graphics Templates
-| Tool | Styles |
-|------|--------|
-| `create_lower_third` | modern, corporate, news, minimal, social |
-| `create_title_card` | cinematic, documentary, social, minimal |
-| `create_transition` | wipe, dissolve, push, slide, zoom |
-| `create_logo_reveal` | fade, scale, slide, spin, glitch, particle |
-| `create_text_animator` | typewriter, fadeIn, scaleIn, slideIn, randomize, wave |
+### Motion Graphics Templates (5)
+| Tool | Supported Styles / Types |
+|------|--------------------------|
+| `create_lower_third` | `modern`, `corporate`, `news`, `minimal`, `social` |
+| `create_title_card` | `cinematic`, `documentary`, `social`, `minimal` |
+| `create_transition` | `wipe_left`, `wipe_right`, `wipe_up`, `wipe_down`, `dissolve`, `push`, `slide`, `zoom` |
+| `create_logo_reveal` | `fade`, `scale`, `slide`, `spin`, `glitch`, `particle` |
+| `create_text_animator` | `typewriter`, `fadeInChars`, `scaleInChars`, `slideInChars`, `randomize`, `wave` |
 
-### Asset Management
-`import_folder` · `replace_footage` · `organize_project_items` · `find_missing_footage` · `collect_files` · `reduce_project`
+### Markers & Time Navigation (10)
+`add_composition_marker` · `add_layer_marker` · `get_markers` · `delete_marker` · `set_work_area` · `get_current_time` · `set_current_time` · `snap_to_marker` · `get_nearest_marker` · `navigate_markers`
 
-### Markers & Timeline
-`add_composition_marker` · `add_layer_marker` · `get_markers` · `delete_marker` · `set_work_area`
+### Render Queue & AME (7)
+`add_to_render_queue` · `list_render_queue` · `list_render_templates` · `set_render_queue_item` · `remove_from_render_queue` · `control_render` · `queue_in_ame`
 
----
-
-## Quick Examples
-
-### Create an animated intro
-
-```
-Create a 1920x1080 composition called "Intro" at 30fps, 5 seconds.
-Add a text layer saying "Welcome" centered on screen.
-Apply a slideInUp animation with easy ease.
-Add a subtle glow effect.
-```
-
-### Build a lower third
-
-```
-Create a modern lower third:
-- Name: "Sarah Chen"
-- Title: "Lead Designer"
-- Blue primary color
-- Animate in and out
-- 5 second duration
-```
-
-### Add physics-based motion
-
-```
-Add a bounce expression to the position of "Logo" layer.
-Set amplitude to 0.15, frequency to 4, decay to 6.
-```
+### MCP Resources & Prompts
+- **Resources:** `ae://project/current` · `ae://compositions`
+- **Prompts:** `create-animation` · `setup-project`
 
 ---
 
-## Animation Presets
+## Expression & Effect Templates
 
-### Spring Physics (Remotion-inspired)
-| Preset | Description |
-|--------|-------------|
-| `gentle` | Subtle, smooth animations |
-| `default` | Balanced spring motion |
-| `wobbly` | Playful, bouncy animations |
-| `stiff` | Quick, responsive animations |
-| `slow` | Heavy, deliberate motion |
-| `bouncy` | High energy bounces |
-| `snappy` | Instant, responsive feel |
-
-### Motion Presets
-**Fade:** `fadeIn` · `fadeOut`
-**Slide:** `slideInLeft` · `slideInRight` · `slideInUp` · `slideInDown` · `slideOutLeft` · `slideOutRight` · `slideOutUp` · `slideOutDown`
-**Scale:** `scaleIn` · `scaleOut` · `scaleInBounce`
-**Physics:** `bounce` · `elastic` · `overshoot`
-**Rotate:** `spinIn` · `spinOut`
-
----
-
-## Expression Templates
-
+### Expression Templates (`apply_expression_template`)
 | Category | Templates |
 |----------|-----------|
-| **Wiggle** | `wiggle` · `wiggleSmooth` · `wiggleFadeIn` · `wiggleFadeOut` |
+| **Wiggle** | `wiggle` · `wiggleSmooth` · `wiggleFadeIn` · `wiggleFadeOut` · `loopingWiggle` · `wiggleOneAxis` |
 | **Loop** | `loopCycle` · `loopPingpong` · `loopOffset` · `loopContinue` |
-| **Physics** | `bounce` · `inertia` · `springy` · `overshoot` |
-| **Linking** | `matchPosition` · `offsetPosition` · `followWithDelay` · `inverseRotation` |
+| **Physics & Speed** | `overshoot` · `bounce` · `inertia` · `springy` · `speedControl` |
+| **Linking** | `matchPosition` · `offsetPosition` · `inverseRotation` · `followPath` |
 | **Time** | `time` · `clock` · `countdown` · `frameNumber` |
 
----
-
-## Effect Templates
-
-| Category | Effects |
-|----------|---------|
+### Effect Templates (`apply_effect_template`)
+| Category | Templates |
+|----------|-----------|
 | **Blur** | `gaussianBlur` · `directionalBlur` · `glassBlur` |
 | **Color** | `curves` · `colorBalance` · `brightnessContrast` · `vibrance` |
 | **Stylistic** | `glow` · `dropShadow` · `vignette` |
@@ -227,38 +216,61 @@ Set amplitude to 0.15, frequency to 4, decay to 6.
 
 ```
 after-effects-mcp/
-├── src/                          # TypeScript source
-│   ├── index.ts                  # Entry point
-│   ├── stdio-server.ts           # MCP server (70+ tools)
+├── src/
+│   ├── index.ts                          # CLI / stdio entry point
+│   ├── stdio-server.ts                   # MCP server (102 tools, 2 resources, 2 prompts)
+│   ├── stdio-server.test.ts              # Tool registration & schema dispatch tests
 │   ├── ae-integration/
-│   │   ├── file-communicator.ts  # File-based IPC
-│   │   └── generators/           # ES3 script generators
-│   └── presets/                  # Animation, expression, effect presets
-├── cep-extension/                # After Effects extension
-│   ├── CSXS/manifest.xml
-│   ├── jsx/host.jsx              # ExtendScript host
-│   └── js/main.js                # Panel JavaScript
-├── SKILL/                        # Claude Code skill
-│   ├── SKILL.md                  # Skill definition
-│   └── examples.md               # Animation examples
-└── scripts/                      # Installation scripts
+│   │   ├── file-communicator.ts          # Serialized queue + atomic file IPC
+│   │   ├── scriptGenerator.ts            # Central generator exports
+│   │   ├── errorHandler.ts               # Friendly error mapping
+│   │   ├── host.test.ts                  # CEP host ExtendScript cleanup & guard tests
+│   │   └── generators/                   # ES3 ExtendScript generators + regressions
+│   ├── presets/                          # Effect, expression, motion-graphics & animation presets
+│   └── types/                            # AE property aliases, MCP types & JSON schemas
+├── cep-extension/                        # After Effects CEP panel (com.aemcp.panel)
+│   ├── index.html                        # Panel UI
+│   ├── CSXS/manifest.xml                 # CEP 12 manifest (--enable-nodejs, --mixed-context)
+│   ├── js/main.js                        # Node fs folder watcher + evalInFlight lock
+│   ├── jsx/host.jsx                      # ES3 ExtendScript host & undo/dialog cleanup
+│   ├── css/style.css                     # Panel styles
+│   └── lib/CSInterface.js                # CEP bridge helper
+├── SKILL/
+│   └── SKILL.md                          # Technical skill guide for AI assistants
+└── scripts/
+    ├── install-cep.bat                   # Windows CEP installer
+    ├── install-cep.sh                    # macOS CEP installer
+    └── test.mjs                          # Portable test runner
 ```
 
 ### Communication Flow
 
 ```
-AI Assistant (Claude)
-        ↓
+AI Assistant (Antigravity / Claude)
+        ↓ MCP (Stdio)
    MCP Server (Node.js)
-        ↓ Write JSON command
+        ↓ Serialized queue (60ms spacing) + atomic .tmp -> .json write
    ~/Documents/ae-mcp-commands/
-        ↓ Poll every 100ms
-   CEP Extension
-        ↓ Execute script
+        ↓ Watched every 150ms via Node fs inside CEPHtmlEngine (0 idle IPC to AE)
+   CEP Extension (main.js)
+        ↓ Single in-flight evalScript + 80ms Win32 UI cooldown
+   ExtendScript Host (host.jsx)
+        ↓ Single undo group + dialog suppression (no $.sleep blocking)
    After Effects DOM
-        ↓ Write response
-   *.json.response
+        ↓ Atomic .response.tmp -> .response + immediate command cleanup
+   MCP Server → AI Assistant
 ```
+
+---
+
+## Development & Testing
+
+```bash
+npm run build   # Compile TypeScript (src/ -> dist/)
+npm test        # Run all test suites via scripts/test.mjs
+```
+
+CI (`.github/workflows/ci.yml`) runs `npm ci`, `npm run build`, and `npm test` on Node 18 and 22 across Ubuntu and Windows.
 
 ---
 
@@ -267,41 +279,38 @@ AI Assistant (Claude)
 <details>
 <summary><strong>Extension not appearing in After Effects</strong></summary>
 
-1. Verify debug mode is enabled (the install script does this automatically)
-2. Restart After Effects completely
-3. Check extension location:
-   - **macOS:** `~/Library/Application Support/Adobe/CEP/extensions/ae-mcp`
-   - **Windows:** `%APPDATA%\Adobe\CEP\extensions\ae-mcp`
+1. Verify `PlayerDebugMode` is set to `1` (`CSXS.10`–`CSXS.12`, and `CSXS.13` if applicable).
+2. Restart After Effects completely.
+3. Check the installed extension folder:
+   - **macOS:** `~/Library/Application Support/Adobe/CEP/extensions/com.aemcp.panel`
+   - **Windows:** `%APPDATA%\Adobe\CEP\extensions\com.aemcp.panel`
+</details>
+
+<details>
+<summary><strong>AE-MCP panel opens off-screen</strong></summary>
+
+If a floating `AE-MCP` window was dragged outside monitor bounds, `host.jsx` (`initMCP()`) automatically resets off-screen `PlugPlugWindowGeometry` coordinates back into view on initialization. You can also choose **Window > Workspace > Reset "Default" to Saved Layout** in After Effects, reopen **Window > Extensions > AE-MCP**, and dock it into a side panel.
 </details>
 
 <details>
 <summary><strong>Commands timing out</strong></summary>
 
-1. Ensure the AE-MCP panel is **visible** in After Effects
-2. Check `~/Documents/ae-mcp-commands/` for command files
-3. Look at the panel's log for errors
+1. Ensure the **AE-MCP** panel is open (**Window > Extensions > AE-MCP**) and shows `Status: Running`.
+2. Verify no modal dialog (alert, save prompt, or file picker) is blocking After Effects.
+3. Check `~/Documents/ae-mcp-commands/` for stuck `.json` files and inspect the panel log.
+4. For long renders, prefer `queue_in_ame` over `control_render(action="start")`, which synchronously blocks the CEP bridge until rendering finishes.
 </details>
 
 <details>
 <summary><strong>Script errors</strong></summary>
 
-1. Open the ExtendScript Toolkit or console in After Effects
-2. Verify composition/layer references exist
-3. Check for ES3 compatibility issues (no arrow functions, template literals, etc.)
+1. Verify composition and layer names/IDs with `list_compositions` and `list_layers`.
+2. Use `/` for nested property paths (never `.`), and use uppercase AE enum constants (e.g., `SCREEN`, `CENTER`).
+3. Ensure any custom ExtendScript remains strictly ES3-compatible (no `let`/`const`, arrow functions, or template literals).
 </details>
 
 ---
 
-## Contributing
-
-Contributions are welcome! Please read our contributing guidelines before submitting PRs.
-
 ## License
 
 MIT
-
----
-
-<p align="center">
-  <sub>Built for motion designers who want to work faster with AI</sub>
-</p>
